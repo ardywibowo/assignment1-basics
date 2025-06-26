@@ -156,35 +156,43 @@ def train_bpe(
         # remove the merged pair from frequency table
         pair_freq.pop(pair, None)
 
-        new_word_freq: Counter[tuple[bytes, ...]] = Counter()
+        # In-place update to avoid creating new_word_freq Counter
+        words_to_update = []
         for word, freq in word_freq.items():
-            i = 0
-            new_tokens: list[bytes] = []
-            length = len(word)
-            changed = False
-            while i < length:
-                if i < length - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
-                    new_tokens.append(new_token)
-                    i += 2
-                    changed = True
-                else:
-                    new_tokens.append(word[i])
-                    i += 1
-            new_word = tuple(new_tokens)
-            new_word_freq[new_word] += freq
-
-            if changed:
-                # update pair frequencies for changed word
-                prev_pairs = zip(word, word[1:])
-                for p in prev_pairs:
+            # Check if word contains the pair to merge
+            if any(word[i] == pair[0] and i + 1 < len(word) and word[i + 1] == pair[1] 
+                   for i in range(len(word) - 1)):
+                
+                # Apply merge to this word
+                new_tokens = []
+                i = 0
+                length = len(word)
+                while i < length:
+                    if i < length - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
+                        new_tokens.append(new_token)
+                        i += 2
+                    else:
+                        new_tokens.append(word[i])
+                        i += 1
+                
+                new_word = tuple(new_tokens)
+                words_to_update.append((word, new_word, freq))
+                
+                # Update pair frequencies efficiently
+                # Remove old pairs
+                for p in zip(word, word[1:]):
                     pair_freq[p] -= freq
                     if pair_freq[p] <= 0:
                         pair_freq.pop(p, None)
-                new_pairs = zip(new_word, new_word[1:])
-                for p in new_pairs:
-                    pair_freq[p] += freq
+                
+                # Add new pairs
+                for p in zip(new_word, new_word[1:]):
+                    pair_freq[p] = pair_freq.get(p, 0) + freq
 
-        word_freq = new_word_freq
+        # Apply word updates in batch
+        for old_word, new_word, freq in words_to_update:
+            del word_freq[old_word]
+            word_freq[new_word] = word_freq.get(new_word, 0) + freq
         next_id += 1
         merges_pbar.update(1)
 
