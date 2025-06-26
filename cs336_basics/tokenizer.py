@@ -171,10 +171,10 @@ def train_bpe(
         merges.append(pair)
 
         # words that contain the pair to merge
-        word_indices = pair_to_words.pop(pair, set())
+        word_indices = sorted(pair_to_words.pop(pair, set()))
         pair_freq.pop(pair, None)
 
-        for idx in list(word_indices):
+        for idx in word_indices:
             word, freq = words[idx]
 
             i = 0
