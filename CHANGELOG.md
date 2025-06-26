@@ -9,6 +9,7 @@ All changes we make to the assignment code or PDF will be documented in this fil
 ## [1.0.6] - 2025-04-16
 ### Added
 - code: optional profiling for `train_bpe` using `cProfile`.
+- code: progress indicators for `train_bpe` using `tqdm`.
 
 ## [1.0.4] - 2025-04-08
 ### Added

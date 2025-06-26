@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import cProfile
 import pstats
+from tqdm import tqdm, trange
 import regex as re
 from collections import Counter
 from io import StringIO
@@ -76,6 +77,7 @@ def train_bpe(
     special_tokens: List[str],
     *,
     profile: bool = False,
+    progress: bool = False,
 ) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
     profiler = cProfile.Profile() if profile else None
     if profiler:
@@ -93,7 +95,7 @@ def train_bpe(
 
     # Collect frequency of pre-token byte sequences
     word_freq: Counter[Tuple[bytes, ...]] = Counter()
-    for part in text_parts:
+    for part in tqdm(text_parts, desc="Tokenizing", disable=not progress):
         for token in PATTERN.findall(part):
             b = token.encode("utf-8")
             word_freq[tuple(bytes([c]) for c in b)] += 1
@@ -103,6 +105,7 @@ def train_bpe(
     merges: List[Tuple[bytes, bytes]] = []
 
     target_size = vocab_size - len(special_tokens)
+    merges_pbar = trange(target_size - len(vocab), desc="BPE merges", disable=not progress)
     while len(vocab) < target_size:
         pair_freq: Counter[Tuple[bytes, bytes]] = Counter()
         for word, freq in word_freq.items():
@@ -135,6 +138,9 @@ def train_bpe(
             new_word_freq[tuple(new_tokens)] += freq
         word_freq = new_word_freq
         next_id += 1
+        merges_pbar.update(1)
+
+    merges_pbar.close()
 
     for st in special_tokens:
         vocab[next_id] = st.encode("utf-8")

@@ -50,6 +50,19 @@ vocab, merges = tokenizer.train_bpe(
 
 This prints a `cProfile` report summarizing where time is spent during training.
 
+### Progress indicators
+
+Enable a progress bar for tokenizer training with the `progress` flag:
+
+```python
+vocab, merges = tokenizer.train_bpe(
+    input_path="path/to/corpus.txt",
+    vocab_size=500,
+    special_tokens=["<|endoftext|>"],
+    progress=True,
+)
+```
+
 ### Download data
 
 Download the TinyStories data and a subsample of OpenWebText
