@@ -609,6 +609,7 @@ def run_train_bpe(
     special_tokens: list[str],
     *,
     profile: bool = False,
+    progress: bool = False,
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """Given the path to an input corpus, run train a BPE tokenizer and
@@ -637,4 +638,5 @@ def run_train_bpe(
         vocab_size=vocab_size,
         special_tokens=special_tokens,
         profile=profile,
+        progress=progress,
     )
