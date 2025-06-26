@@ -196,12 +196,15 @@ def train_bpe(
 
             for p, c in old_pairs.items():
                 pair_freq[p] -= freq * c
+                indices = pair_to_words.get(p)
+                if indices is not None:
+                    indices.discard(idx)
                 if pair_freq[p] <= 0:
-                    pair_freq.pop(p, None)
-                    pair_to_words.pop(p, None)
+                    if not indices:
+                        pair_freq.pop(p, None)
+                        pair_to_words.pop(p, None)
                 else:
                     heappush(pair_heap, (-pair_freq[p], p))
-                    pair_to_words.get(p, set()).discard(idx)
 
             for p, c in new_pairs.items():
                 pair_freq[p] += freq * c
