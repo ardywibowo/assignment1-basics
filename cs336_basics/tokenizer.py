@@ -1,7 +1,12 @@
 from __future__ import annotations
+
+import cProfile
+import pstats
+from tqdm import tqdm, trange
 import regex as re
 from collections import Counter
-from typing import Iterable, List, Tuple, Dict, Optional
+from io import StringIO
+from typing import Dict, Iterable, List, Optional, Tuple
 
 PATTERN = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\v\p{L}\p{N}]+|\s+(?!\S)|\s+")
 
@@ -66,7 +71,18 @@ class Tokenizer:
         return byte_seq.decode('utf-8', errors='replace')
 
 
-def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
+def train_bpe(
+    input_path: str,
+    vocab_size: int,
+    special_tokens: List[str],
+    *,
+    profile: bool = False,
+    progress: bool = False,
+) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
+    profiler = cProfile.Profile() if profile else None
+    if profiler:
+        profiler.enable()
+
     with open(input_path, "r", encoding="utf-8") as f:
         text = f.read()
 
@@ -79,7 +95,7 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tu
 
     # Collect frequency of pre-token byte sequences
     word_freq: Counter[Tuple[bytes, ...]] = Counter()
-    for part in text_parts:
+    for part in tqdm(text_parts, desc="Tokenizing", disable=not progress):
         for token in PATTERN.findall(part):
             b = token.encode("utf-8")
             word_freq[tuple(bytes([c]) for c in b)] += 1
@@ -89,11 +105,11 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tu
     merges: List[Tuple[bytes, bytes]] = []
 
     target_size = vocab_size - len(special_tokens)
+    merges_pbar = trange(target_size - len(vocab), desc="BPE merges", disable=not progress)
     while len(vocab) < target_size:
         pair_freq: Counter[Tuple[bytes, bytes]] = Counter()
         for word, freq in word_freq.items():
-            tokens = list(word)
-            for a, b in zip(tokens, tokens[1:]):
+            for a, b in zip(word, word[1:]):
                 pair_freq[(a, b)] += freq
         if not pair_freq:
             break
@@ -108,22 +124,30 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tu
 
         new_word_freq: Counter[Tuple[bytes, ...]] = Counter()
         for word, freq in word_freq.items():
-            tokens = list(word)
             i = 0
-            new_tokens = []
-            while i < len(tokens):
-                if i < len(tokens) - 1 and tokens[i] == pair[0] and tokens[i + 1] == pair[1]:
+            new_tokens: List[bytes] = []
+            length = len(word)
+            while i < length:
+                if i < length - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
                     new_tokens.append(new_token)
                     i += 2
                 else:
-                    new_tokens.append(tokens[i])
+                    new_tokens.append(word[i])
                     i += 1
             new_word_freq[tuple(new_tokens)] += freq
         word_freq = new_word_freq
         next_id += 1
+        merges_pbar.update(1)
+
+    merges_pbar.close()
 
     for st in special_tokens:
         vocab[next_id] = st.encode("utf-8")
         next_id += 1
+    if profiler:
+        profiler.disable()
+        s = StringIO()
+        pstats.Stats(profiler, stream=s).sort_stats("cumulative").print_stats()
+        print(s.getvalue())
 
     return vocab, merges

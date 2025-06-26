@@ -32,6 +32,37 @@ Initially, all tests should fail with `NotImplementedError`s.
 To connect your implementation to the tests, complete the
 functions in [./tests/adapters.py](./tests/adapters.py).
 
+### Profiling BPE training
+
+You can inspect performance of the tokenizer training routine by enabling
+profiling when calling `train_bpe` (or the `run_train_bpe` adapter):
+
+```python
+from cs336_basics import tokenizer
+
+vocab, merges = tokenizer.train_bpe(
+    input_path="path/to/corpus.txt",
+    vocab_size=500,
+    special_tokens=["<|endoftext|>"],
+    profile=True,
+)
+```
+
+This prints a `cProfile` report summarizing where time is spent during training.
+
+### Progress indicators
+
+Enable a progress bar for tokenizer training with the `progress` flag:
+
+```python
+vocab, merges = tokenizer.train_bpe(
+    input_path="path/to/corpus.txt",
+    vocab_size=500,
+    special_tokens=["<|endoftext|>"],
+    progress=True,
+)
+```
+
 ### Download data
 
 Download the TinyStories data and a subsample of OpenWebText
