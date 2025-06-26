@@ -206,13 +206,32 @@ def train_bpe(
                 else:
                     heappush(pair_heap, (-pair_freq[p], p))
 
-            for p, c in new_pairs.items():
-                pair_freq[p] += freq * c
-                pair_to_words.setdefault(p, set()).add(idx)
-                heappush(pair_heap, (-pair_freq[p], p))
+        for p, c in new_pairs.items():
+            pair_freq[p] += freq * c
+            pair_to_words.setdefault(p, set()).add(idx)
+            heappush(pair_heap, (-pair_freq[p], p))
 
         next_id += 1
         merges_pbar.update(1)
+
+        # After applying the merge, aggregate identical words so that
+        # subsequent merges behave deterministically. Rebuild the pair
+        # frequency table and word mappings from this compact form.
+        new_word_freq: Counter[tuple[bytes, ...]] = Counter()
+        for w, f in words:
+            new_word_freq[w] += f
+
+        words = list(new_word_freq.items())
+        pair_freq = Counter()
+        pair_to_words = {}
+        for i, (w, f) in enumerate(words):
+            counts = Counter(zip(w, w[1:]))
+            for p, c in counts.items():
+                pair_freq[p] += f * c
+                pair_to_words.setdefault(p, set()).add(i)
+
+        pair_heap = [(-f, p) for p, f in pair_freq.items()]
+        heapify(pair_heap)
 
     merges_pbar.close()
 
