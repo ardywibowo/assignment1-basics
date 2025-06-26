@@ -1,7 +1,11 @@
 from __future__ import annotations
+
+import cProfile
+import pstats
 import regex as re
 from collections import Counter
-from typing import Iterable, List, Tuple, Dict, Optional
+from io import StringIO
+from typing import Dict, Iterable, List, Optional, Tuple
 
 PATTERN = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\v\p{L}\p{N}]+|\s+(?!\S)|\s+")
 
@@ -66,7 +70,17 @@ class Tokenizer:
         return byte_seq.decode('utf-8', errors='replace')
 
 
-def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
+def train_bpe(
+    input_path: str,
+    vocab_size: int,
+    special_tokens: List[str],
+    *,
+    profile: bool = False,
+) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
+    profiler = cProfile.Profile() if profile else None
+    if profiler:
+        profiler.enable()
+
     with open(input_path, "r", encoding="utf-8") as f:
         text = f.read()
 
@@ -125,5 +139,10 @@ def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tu
     for st in special_tokens:
         vocab[next_id] = st.encode("utf-8")
         next_id += 1
+    if profiler:
+        profiler.disable()
+        s = StringIO()
+        pstats.Stats(profiler, stream=s).sort_stats("cumulative").print_stats()
+        print(s.getvalue())
 
     return vocab, merges
