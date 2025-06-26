@@ -49,6 +49,7 @@ def test_train_bpe():
         ]
     assert merges == reference_merges
 
+
     # Compare the vocab to the expected output vocab
     with open(reference_vocab_path) as f:
         gpt2_reference_vocab = json.load(f)
@@ -86,3 +87,28 @@ def test_train_bpe_special_tokens(snapshot):
             "merges": merges,
         },
     )
+
+
+def test_train_bpe_reference_merges_subset():
+    """Check that merges match the reference for a smaller vocab size."""
+    input_path = FIXTURES_PATH / "corpus.en"
+    vocab_size = 300
+    _, merges = run_train_bpe(
+        input_path=input_path,
+        vocab_size=vocab_size,
+        special_tokens=["<|endoftext|>"],
+    )
+
+    reference_merges_path = FIXTURES_PATH / "train-bpe-reference-merges.txt"
+    num_merges = vocab_size - 1 - 256
+    gpt2_byte_decoder = {v: k for k, v in gpt2_bytes_to_unicode().items()}
+    with open(reference_merges_path) as f:
+        gpt2_reference_merges = [tuple(line.rstrip().split(" ")) for line in f][:num_merges]
+        reference_merges = [
+            (
+                bytes([gpt2_byte_decoder[token] for token in merge_token_1]),
+                bytes([gpt2_byte_decoder[token] for token in merge_token_2]),
+            )
+            for merge_token_1, merge_token_2 in gpt2_reference_merges
+        ]
+    assert merges == reference_merges

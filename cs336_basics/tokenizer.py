@@ -4,6 +4,7 @@ import cProfile
 import multiprocessing as mp
 import pstats
 from collections import Counter
+from heapq import heapify, heappop, heappush
 from io import StringIO
 from collections.abc import Iterable
 
@@ -137,56 +138,100 @@ def train_bpe(
 
     target_size = vocab_size - len(special_tokens)
 
-    # precompute pair frequencies once and update them incrementally
+    # Convert the Counter to a list so we can mutate words in place and
+    # keep track of which words contain which pairs. This lets us update
+    # only the affected words after each merge instead of scanning the
+    # entire vocabulary.
+    words = list(word_freq.items())  # (tuple[bytes, ...], freq)
     pair_freq: Counter[tuple[bytes, bytes]] = Counter()
-    for word, freq in word_freq.items():
-        for a, b in zip(word, word[1:]):
-            pair_freq[(a, b)] += freq
+    pair_to_words: dict[tuple[bytes, bytes], set[int]] = {}
+
+    for idx, (word, freq) in enumerate(words):
+        counts = Counter(zip(word, word[1:]))
+        for pair, c in counts.items():
+            pair_freq[pair] += freq * c
+            pair_to_words.setdefault(pair, set()).add(idx)
+
+    pair_heap: list[tuple[int, tuple[bytes, bytes]]] = [(-f, p) for p, f in pair_freq.items()]
+    heapify(pair_heap)
 
     merges_pbar = trange(target_size - len(vocab), desc="BPE merges", disable=not progress)
     while len(vocab) < target_size and pair_freq:
-        max_freq = max(pair_freq.values())
-        candidates = [p for p, f in pair_freq.items() if f == max_freq]
-        pair = max(candidates)  # lexicographically greatest pair
+        # get the highest frequency pair, skipping outdated heap entries
+        while pair_heap:
+            neg_freq, pair = heappop(pair_heap)
+            freq = -neg_freq
+            if pair_freq.get(pair) == freq:
+                break
+        else:
+            break
 
         new_token = pair[0] + pair[1]
         vocab[next_id] = new_token
         merges.append(pair)
 
-        # remove the merged pair from frequency table
+        # words that contain the pair to merge
+        word_indices = sorted(pair_to_words.pop(pair, set()))
         pair_freq.pop(pair, None)
 
-        new_word_freq: Counter[tuple[bytes, ...]] = Counter()
-        for word, freq in word_freq.items():
+        for idx in word_indices:
+            word, freq = words[idx]
+
             i = 0
             new_tokens: list[bytes] = []
             length = len(word)
-            changed = False
             while i < length:
                 if i < length - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
                     new_tokens.append(new_token)
                     i += 2
-                    changed = True
                 else:
                     new_tokens.append(word[i])
                     i += 1
+
             new_word = tuple(new_tokens)
-            new_word_freq[new_word] += freq
+            words[idx] = (new_word, freq)
 
-            if changed:
-                # update pair frequencies for changed word
-                prev_pairs = zip(word, word[1:])
-                for p in prev_pairs:
-                    pair_freq[p] -= freq
-                    if pair_freq[p] <= 0:
+            old_pairs = Counter(zip(word, word[1:]))
+            new_pairs = Counter(zip(new_word, new_word[1:]))
+
+            for p, c in old_pairs.items():
+                pair_freq[p] -= freq * c
+                indices = pair_to_words.get(p)
+                if indices is not None:
+                    indices.discard(idx)
+                if pair_freq[p] <= 0:
+                    if not indices:
                         pair_freq.pop(p, None)
-                new_pairs = zip(new_word, new_word[1:])
-                for p in new_pairs:
-                    pair_freq[p] += freq
+                        pair_to_words.pop(p, None)
+                else:
+                    heappush(pair_heap, (-pair_freq[p], p))
 
-        word_freq = new_word_freq
+        for p, c in new_pairs.items():
+            pair_freq[p] += freq * c
+            pair_to_words.setdefault(p, set()).add(idx)
+            heappush(pair_heap, (-pair_freq[p], p))
+
         next_id += 1
         merges_pbar.update(1)
+
+        # After applying the merge, aggregate identical words so that
+        # subsequent merges behave deterministically. Rebuild the pair
+        # frequency table and word mappings from this compact form.
+        new_word_freq: Counter[tuple[bytes, ...]] = Counter()
+        for w, f in words:
+            new_word_freq[w] += f
+
+        words = list(new_word_freq.items())
+        pair_freq = Counter()
+        pair_to_words = {}
+        for i, (w, f) in enumerate(words):
+            counts = Counter(zip(w, w[1:]))
+            for p, c in counts.items():
+                pair_freq[p] += f * c
+                pair_to_words.setdefault(p, set()).add(i)
+
+        pair_heap = [(-f, p) for p, f in pair_freq.items()]
+        heapify(pair_heap)
 
     merges_pbar.close()
 
