@@ -67,51 +67,63 @@ class Tokenizer:
 
 
 def train_bpe(input_path: str, vocab_size: int, special_tokens: List[str]) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
-    with open(input_path, 'r', encoding='utf-8') as f:
+    with open(input_path, "r", encoding="utf-8") as f:
         text = f.read()
+
     if special_tokens:
-        pattern = '(' + '|'.join(re.escape(t) for t in special_tokens) + ')'
+        pattern = "(" + "|".join(re.escape(t) for t in special_tokens) + ")"
         parts = re.split(pattern, text)
         text_parts = [p for p in parts if p and p not in special_tokens]
     else:
         text_parts = [text]
-    word_freq: Counter[Tuple[int, ...]] = Counter()
+
+    # Collect frequency of pre-token byte sequences
+    word_freq: Counter[Tuple[bytes, ...]] = Counter()
     for part in text_parts:
         for token in PATTERN.findall(part):
-            b = token.encode('utf-8')
-            word_freq[tuple(b)] += 1
+            b = token.encode("utf-8")
+            word_freq[tuple(bytes([c]) for c in b)] += 1
+
     vocab: Dict[int, bytes] = {i: bytes([i]) for i in range(256)}
     next_id = 256
     merges: List[Tuple[bytes, bytes]] = []
-    while len(vocab) < vocab_size - len(special_tokens):
-        pair_freq: Counter[Tuple[int, int]] = Counter()
+
+    target_size = vocab_size - len(special_tokens)
+    while len(vocab) < target_size:
+        pair_freq: Counter[Tuple[bytes, bytes]] = Counter()
         for word, freq in word_freq.items():
-            for a, b in zip(word, word[1:]):
+            tokens = list(word)
+            for a, b in zip(tokens, tokens[1:]):
                 pair_freq[(a, b)] += freq
         if not pair_freq:
             break
+
         max_freq = max(pair_freq.values())
         candidates = [p for p, f in pair_freq.items() if f == max_freq]
-        pair = max(candidates)
-        new_token = vocab[pair[0]] + vocab[pair[1]]
+        pair = max(candidates)  # lexicographically greatest pair
+
+        new_token = pair[0] + pair[1]
         vocab[next_id] = new_token
-        merges.append((vocab[pair[0]], vocab[pair[1]]))
-        new_word_freq: Counter[Tuple[int, ...]] = Counter()
+        merges.append(pair)
+
+        new_word_freq: Counter[Tuple[bytes, ...]] = Counter()
         for word, freq in word_freq.items():
+            tokens = list(word)
             i = 0
-            new_word = []
-            w = list(word)
-            while i < len(w):
-                if i < len(w)-1 and w[i] == pair[0] and w[i+1] == pair[1]:
-                    new_word.append(next_id)
+            new_tokens = []
+            while i < len(tokens):
+                if i < len(tokens) - 1 and tokens[i] == pair[0] and tokens[i + 1] == pair[1]:
+                    new_tokens.append(new_token)
                     i += 2
                 else:
-                    new_word.append(w[i])
+                    new_tokens.append(tokens[i])
                     i += 1
-            new_word_freq[tuple(new_word)] += freq
+            new_word_freq[tuple(new_tokens)] += freq
         word_freq = new_word_freq
         next_id += 1
+
     for st in special_tokens:
-        vocab[next_id] = st.encode('utf-8')
+        vocab[next_id] = st.encode("utf-8")
         next_id += 1
+
     return vocab, merges
