@@ -4,6 +4,7 @@ import cProfile
 import multiprocessing as mp
 import pstats
 from collections import Counter
+from heapq import heapify, heappop, heappush
 from io import StringIO
 from collections.abc import Iterable
 
@@ -143,11 +144,19 @@ def train_bpe(
         for a, b in zip(word, word[1:]):
             pair_freq[(a, b)] += freq
 
+    pair_heap: list[tuple[int, tuple[bytes, bytes]]] = [(-f, p) for p, f in pair_freq.items()]
+    heapify(pair_heap)
+
     merges_pbar = trange(target_size - len(vocab), desc="BPE merges", disable=not progress)
     while len(vocab) < target_size and pair_freq:
-        max_freq = max(pair_freq.values())
-        candidates = [p for p, f in pair_freq.items() if f == max_freq]
-        pair = max(candidates)  # lexicographically greatest pair
+        # get the highest frequency pair, skipping outdated heap entries
+        while pair_heap:
+            neg_freq, pair = heappop(pair_heap)
+            freq = -neg_freq
+            if pair_freq.get(pair) == freq:
+                break
+        else:
+            break
 
         new_token = pair[0] + pair[1]
         vocab[next_id] = new_token
@@ -180,9 +189,12 @@ def train_bpe(
                     pair_freq[p] -= freq
                     if pair_freq[p] <= 0:
                         pair_freq.pop(p, None)
+                    else:
+                        heappush(pair_heap, (-pair_freq[p], p))
                 new_pairs = zip(new_word, new_word[1:])
                 for p in new_pairs:
                     pair_freq[p] += freq
+                    heappush(pair_heap, (-pair_freq[p], p))
 
         word_freq = new_word_freq
         next_id += 1
