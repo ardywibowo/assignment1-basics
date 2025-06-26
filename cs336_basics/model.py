@@ -72,6 +72,10 @@ def multihead_self_attention(
     if theta is not None and token_positions is not None and max_seq_len is not None:
         Q = apply_rope(Q, token_positions, theta, max_seq_len)
         K = apply_rope(K, token_positions, theta, max_seq_len)
+
+    if mask is None:
+        mask = torch.ones(seq_len, seq_len, dtype=torch.bool, device=in_features.device).tril()
+
     attn_out = scaled_dot_product_attention(Q, K, V, mask)
     attn_out = attn_out.transpose(1, 2).contiguous().view(batch, seq_len, d_model)
     return attn_out @ o_proj_weight.t()
