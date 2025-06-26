@@ -1,25 +1,36 @@
 from __future__ import annotations
 
 import cProfile
+import multiprocessing as mp
 import pstats
-from tqdm import tqdm, trange
-import regex as re
 from collections import Counter
 from io import StringIO
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+
+import regex as re
+from tqdm import tqdm, trange
 
 PATTERN = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\v\p{L}\p{N}]+|\s+(?!\S)|\s+")
 
 
+def _count_tokens(text: str) -> Counter[tuple[bytes, ...]]:
+    """Count byte-level tokens in a chunk of text."""
+    counter: Counter[tuple[bytes, ...]] = Counter()
+    for token in PATTERN.findall(text):
+        b = token.encode("utf-8")
+        counter[tuple(bytes([c]) for c in b)] += 1
+    return counter
+
+
 class Tokenizer:
-    def __init__(self, vocab: Dict[int, bytes], merges: List[Tuple[bytes, bytes]], special_tokens: Optional[List[str]] = None):
+    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None):
         self.id_to_token = dict(vocab)
         self.token_to_id = {v: k for k, v in vocab.items()}
         self.special_tokens = special_tokens or []
         self.special_token_bytes = [t.encode('utf-8') for t in self.special_tokens]
         self.bpe_ranks = {merge: i for i, merge in enumerate(merges)}
 
-    def _bpe(self, token_bytes: bytes) -> List[bytes]:
+    def _bpe(self, token_bytes: bytes) -> list[bytes]:
         tokens = [bytes([b]) for b in token_bytes]
         while len(tokens) >= 2:
             pairs = [(tokens[i], tokens[i+1]) for i in range(len(tokens)-1)]
@@ -31,14 +42,14 @@ class Tokenizer:
             tokens[idx:idx+2] = [tokens[idx] + tokens[idx+1]]
         return tokens
 
-    def _encode_segment(self, text: str) -> List[int]:
+    def _encode_segment(self, text: str) -> list[int]:
         tokens = []
         for token in PATTERN.findall(text):
             for piece in self._bpe(token.encode('utf-8')):
                 tokens.append(self.token_to_id[piece])
         return tokens
 
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> list[int]:
         if not self.special_tokens:
             return self._encode_segment(text)
         tokens = []
@@ -63,8 +74,7 @@ class Tokenizer:
 
     def encode_iterable(self, iterable: Iterable[str]):
         for chunk in iterable:
-            for token in self.encode(chunk):
-                yield token
+            yield from self.encode(chunk)
 
     def decode(self, ids: Iterable[int]) -> str:
         byte_seq = b"".join(self.id_to_token[id] for id in ids)
@@ -74,40 +84,61 @@ class Tokenizer:
 def train_bpe(
     input_path: str,
     vocab_size: int,
-    special_tokens: List[str],
+    special_tokens: list[str],
     *,
     profile: bool = False,
     progress: bool = False,
-) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     profiler = cProfile.Profile() if profile else None
     if profiler:
         profiler.enable()
 
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:
         text = f.read()
 
-    if special_tokens:
-        pattern = "(" + "|".join(re.escape(t) for t in special_tokens) + ")"
-        parts = re.split(pattern, text)
-        text_parts = [p for p in parts if p and p not in special_tokens]
+    # Split into documents using <|endoftext|> as a delimiter when present.
+    if "<|endoftext|>" in special_tokens:
+        docs = text.split("<|endoftext|>")
     else:
-        text_parts = [text]
+        docs = [text]
 
-    # Collect frequency of pre-token byte sequences
-    word_freq: Counter[Tuple[bytes, ...]] = Counter()
-    for part in tqdm(text_parts, desc="Tokenizing", disable=not progress):
-        for token in PATTERN.findall(part):
-            b = token.encode("utf-8")
-            word_freq[tuple(bytes([c]) for c in b)] += 1
+    # Remove any other special tokens from documents before tokenizing
+    other_specials = [t for t in special_tokens if t != "<|endoftext|>"]
+    if other_specials:
+        pattern = "(" + "|".join(re.escape(t) for t in other_specials) + ")"
+        processed_docs: list[str] = []
+        for doc in docs:
+            parts = re.split(pattern, doc)
+            processed_docs.extend(p for p in parts if p and p not in other_specials)
+        docs = processed_docs
 
-    vocab: Dict[int, bytes] = {i: bytes([i]) for i in range(256)}
+    # Collect frequency of pre-token byte sequences with multiprocessing
+    word_freq: Counter[tuple[bytes, ...]] = Counter()
+    num_workers = min(mp.cpu_count() or 1, len(docs))
+    if num_workers > 1:
+        with mp.Pool(num_workers) as pool:
+            counters = list(
+                tqdm(
+                    pool.imap(_count_tokens, docs),
+                    total=len(docs),
+                    desc="Tokenizing",
+                    disable=not progress,
+                )
+            )
+        for c in counters:
+            word_freq.update(c)
+    else:
+        for doc in tqdm(docs, desc="Tokenizing", disable=not progress):
+            word_freq.update(_count_tokens(doc))
+
+    vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
     next_id = 256
-    merges: List[Tuple[bytes, bytes]] = []
+    merges: list[tuple[bytes, bytes]] = []
 
     target_size = vocab_size - len(special_tokens)
 
     # precompute pair frequencies once and update them incrementally
-    pair_freq: Counter[Tuple[bytes, bytes]] = Counter()
+    pair_freq: Counter[tuple[bytes, bytes]] = Counter()
     for word, freq in word_freq.items():
         for a, b in zip(word, word[1:]):
             pair_freq[(a, b)] += freq
@@ -125,10 +156,10 @@ def train_bpe(
         # remove the merged pair from frequency table
         pair_freq.pop(pair, None)
 
-        new_word_freq: Counter[Tuple[bytes, ...]] = Counter()
+        new_word_freq: Counter[tuple[bytes, ...]] = Counter()
         for word, freq in word_freq.items():
             i = 0
-            new_tokens: List[bytes] = []
+            new_tokens: list[bytes] = []
             length = len(word)
             changed = False
             while i < length:
