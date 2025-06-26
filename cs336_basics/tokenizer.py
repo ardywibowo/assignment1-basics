@@ -138,11 +138,19 @@ def train_bpe(
 
     target_size = vocab_size - len(special_tokens)
 
-    # precompute pair frequencies once and update them incrementally
+    # Convert the Counter to a list so we can mutate words in place and
+    # keep track of which words contain which pairs. This lets us update
+    # only the affected words after each merge instead of scanning the
+    # entire vocabulary.
+    words = list(word_freq.items())  # (tuple[bytes, ...], freq)
     pair_freq: Counter[tuple[bytes, bytes]] = Counter()
-    for word, freq in word_freq.items():
-        for a, b in zip(word, word[1:]):
-            pair_freq[(a, b)] += freq
+    pair_to_words: dict[tuple[bytes, bytes], set[int]] = {}
+
+    for idx, (word, freq) in enumerate(words):
+        counts = Counter(zip(word, word[1:]))
+        for pair, c in counts.items():
+            pair_freq[pair] += freq * c
+            pair_to_words.setdefault(pair, set()).add(idx)
 
     pair_heap: list[tuple[int, tuple[bytes, bytes]]] = [(-f, p) for p, f in pair_freq.items()]
     heapify(pair_heap)
@@ -162,41 +170,44 @@ def train_bpe(
         vocab[next_id] = new_token
         merges.append(pair)
 
-        # remove the merged pair from frequency table
+        # words that contain the pair to merge
+        word_indices = pair_to_words.pop(pair, set())
         pair_freq.pop(pair, None)
 
-        new_word_freq: Counter[tuple[bytes, ...]] = Counter()
-        for word, freq in word_freq.items():
+        for idx in list(word_indices):
+            word, freq = words[idx]
+
             i = 0
             new_tokens: list[bytes] = []
             length = len(word)
-            changed = False
             while i < length:
                 if i < length - 1 and word[i] == pair[0] and word[i + 1] == pair[1]:
                     new_tokens.append(new_token)
                     i += 2
-                    changed = True
                 else:
                     new_tokens.append(word[i])
                     i += 1
+
             new_word = tuple(new_tokens)
-            new_word_freq[new_word] += freq
+            words[idx] = (new_word, freq)
 
-            if changed:
-                # update pair frequencies for changed word
-                prev_pairs = zip(word, word[1:])
-                for p in prev_pairs:
-                    pair_freq[p] -= freq
-                    if pair_freq[p] <= 0:
-                        pair_freq.pop(p, None)
-                    else:
-                        heappush(pair_heap, (-pair_freq[p], p))
-                new_pairs = zip(new_word, new_word[1:])
-                for p in new_pairs:
-                    pair_freq[p] += freq
+            old_pairs = Counter(zip(word, word[1:]))
+            new_pairs = Counter(zip(new_word, new_word[1:]))
+
+            for p, c in old_pairs.items():
+                pair_freq[p] -= freq * c
+                if pair_freq[p] <= 0:
+                    pair_freq.pop(p, None)
+                    pair_to_words.pop(p, None)
+                else:
                     heappush(pair_heap, (-pair_freq[p], p))
+                    pair_to_words.get(p, set()).discard(idx)
 
-        word_freq = new_word_freq
+            for p, c in new_pairs.items():
+                pair_freq[p] += freq * c
+                pair_to_words.setdefault(p, set()).add(idx)
+                heappush(pair_heap, (-pair_freq[p], p))
+
         next_id += 1
         merges_pbar.update(1)
 
