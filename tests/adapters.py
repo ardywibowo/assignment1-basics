@@ -607,6 +607,8 @@ def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
+    *,
+    profile: bool = False,
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """Given the path to an input corpus, run train a BPE tokenizer and
@@ -634,4 +636,5 @@ def run_train_bpe(
         input_path=input_path,
         vocab_size=vocab_size,
         special_tokens=special_tokens,
+        profile=profile,
     )

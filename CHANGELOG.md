@@ -6,6 +6,10 @@ All changes we make to the assignment code or PDF will be documented in this fil
 ## [1.0.5] 2025-04-15
 - code: Add submission script, fix typos
 
+## [1.0.6] - 2025-04-16
+### Added
+- code: optional profiling for `train_bpe` using `cProfile`.
+
 ## [1.0.4] - 2025-04-08
 ### Added
 - handout: add guidance on parallelizing pretokenization and provide starter code for chunking
