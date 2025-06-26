@@ -5,6 +5,7 @@ vocab, merges = train_bpe(
     vocab_size=10_000,
     special_tokens=["<|endoftext|>"],
     profile=True,
+    progress=True,
 )
 
 # Optionally serialize the outputs
