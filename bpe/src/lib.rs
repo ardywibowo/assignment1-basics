@@ -1,21 +1,21 @@
 mod dataset;
 mod bpe;
 mod common;
+mod pretokenize;
 
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
 #[pyfunction]
-fn train_bpe_py(text: &str) -> PyResult<(HashMap<u32, String>, Vec<(u32, u32)>)> {
+#[pyo3(signature = (text, vocab_size, special_tokens, progress = false))]
+fn train_bpe_py(text: &str, vocab_size: usize, special_tokens: Vec<String>, progress: bool) -> PyResult<(HashMap<u32, Vec<u8>>, Vec<(u32, u32)>)> {
     let mut counts: HashMap<(u32, u32), u32> = HashMap::new();
     let mut merges: HashMap<(u32, u32), u32> = HashMap::new();
     let mut vocab: HashMap<u32, String> = HashMap::new();
 
-    bpe::train(text, &mut merges, &mut vocab, &mut counts);
+    let (merges_vec, vocab_bytes) = bpe::train(text, vocab_size, special_tokens, &mut merges, &mut vocab, &mut counts, progress);
 
-    let merges_vec: Vec<(u32, u32)> = merges.into_iter().map(|(k, _)| k).collect();
-
-    Ok((vocab, merges_vec))
+    Ok((vocab_bytes, merges_vec))
 }
 
 #[pymodule]

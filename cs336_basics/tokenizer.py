@@ -15,7 +15,9 @@ try:
 except Exception:  # pragma: no cover - optional dependency may not be built
     _rust_train_bpe = None
 
-PATTERN = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\v\p{L}\p{N}]+|\s+(?!\S)|\s+")
+PATTERN = re.compile(
+    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+)
 
 
 def _count_tokens(text: str) -> Counter[tuple[bytes, ...]]:
@@ -28,29 +30,34 @@ def _count_tokens(text: str) -> Counter[tuple[bytes, ...]]:
 
 
 class Tokenizer:
-    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None):
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ):
         self.id_to_token = dict(vocab)
         self.token_to_id = {v: k for k, v in vocab.items()}
         self.special_tokens = special_tokens or []
-        self.special_token_bytes = [t.encode('utf-8') for t in self.special_tokens]
+        self.special_token_bytes = [t.encode("utf-8") for t in self.special_tokens]
         self.bpe_ranks = {merge: i for i, merge in enumerate(merges)}
 
     def _bpe(self, token_bytes: bytes) -> list[bytes]:
         tokens = [bytes([b]) for b in token_bytes]
         while len(tokens) >= 2:
-            pairs = [(tokens[i], tokens[i+1]) for i in range(len(tokens)-1)]
-            ranks = [self.bpe_ranks.get(p, float('inf')) for p in pairs]
+            pairs = [(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)]
+            ranks = [self.bpe_ranks.get(p, float("inf")) for p in pairs]
             min_rank = min(ranks)
-            if min_rank == float('inf'):
+            if min_rank == float("inf"):
                 break
             idx = ranks.index(min_rank)
-            tokens[idx:idx+2] = [tokens[idx] + tokens[idx+1]]
+            tokens[idx : idx + 2] = [tokens[idx] + tokens[idx + 1]]
         return tokens
 
     def _encode_segment(self, text: str) -> list[int]:
         tokens = []
         for token in PATTERN.findall(text):
-            for piece in self._bpe(token.encode('utf-8')):
+            for piece in self._bpe(token.encode("utf-8")):
                 tokens.append(self.token_to_id[piece])
         return tokens
 
@@ -64,14 +71,16 @@ class Tokenizer:
             matched = False
             for tok in specials_sorted:
                 if text.startswith(tok, i):
-                    tokens.append(self.token_to_id[tok.encode('utf-8')])
+                    tokens.append(self.token_to_id[tok.encode("utf-8")])
                     i += len(tok)
                     matched = True
                     break
             if matched:
                 continue
             j = i
-            while j < len(text) and not any(text.startswith(st, j) for st in specials_sorted):
+            while j < len(text) and not any(
+                text.startswith(st, j) for st in specials_sorted
+            ):
                 j += 1
             tokens.extend(self._encode_segment(text[i:j]))
             i = j
@@ -83,7 +92,7 @@ class Tokenizer:
 
     def decode(self, ids: Iterable[int]) -> str:
         byte_seq = b"".join(self.id_to_token[id] for id in ids)
-        return byte_seq.decode('utf-8', errors='replace')
+        return byte_seq.decode("utf-8", errors="replace")
 
 
 def train_bpe(
@@ -106,8 +115,10 @@ def train_bpe(
         use_rust = _rust_train_bpe is not None
 
     if use_rust and _rust_train_bpe:
-        vocab_map, merges_list = _rust_train_bpe(text)
-        vocab = {int(k): v.encode("utf-8") for k, v in vocab_map.items()}
+        vocab_map, merges_list = _rust_train_bpe(
+            text, vocab_size, special_tokens, progress
+        )
+        vocab = {int(k): bytes(v) for k, v in vocab_map.items()}
         merges = []
         for a_id, b_id in merges_list:
             merges.append((vocab[a_id], vocab[b_id]))
@@ -162,7 +173,9 @@ def train_bpe(
         for a, b in zip(word, word[1:]):
             pair_freq[(a, b)] += freq
 
-    merges_pbar = trange(target_size - len(vocab), desc="BPE merges", disable=not progress)
+    merges_pbar = trange(
+        target_size - len(vocab), desc="BPE merges", disable=not progress
+    )
     while len(vocab) < target_size and pair_freq:
         max_freq = max(pair_freq.values())
         candidates = [p for p, f in pair_freq.items() if f == max_freq]
@@ -179,9 +192,11 @@ def train_bpe(
         words_to_update = []
         for word, freq in word_freq.items():
             # Check if word contains the pair to merge
-            if any(word[i] == pair[0] and i + 1 < len(word) and word[i + 1] == pair[1] 
-                   for i in range(len(word) - 1)):
-                
+            if any(
+                word[i] == pair[0] and i + 1 < len(word) and word[i + 1] == pair[1]
+                for i in range(len(word) - 1)
+            ):
+
                 # Apply merge to this word
                 new_tokens = []
                 i = 0
@@ -193,17 +208,17 @@ def train_bpe(
                     else:
                         new_tokens.append(word[i])
                         i += 1
-                
+
                 new_word = tuple(new_tokens)
                 words_to_update.append((word, new_word, freq))
-                
+
                 # Update pair frequencies efficiently
                 # Remove old pairs
                 for p in zip(word, word[1:]):
                     pair_freq[p] -= freq
                     if pair_freq[p] <= 0:
                         pair_freq.pop(p, None)
-                
+
                 # Add new pairs
                 for p in zip(new_word, new_word[1:]):
                     pair_freq[p] = pair_freq.get(p, 0) + freq
