@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+try:
+    from . import rsbpe as _rsbpe
+except Exception:  # pragma: no cover - optional acceleration module
+    try:
+        import rsbpe as _rsbpe  # type: ignore
+    except Exception:
+        _rsbpe = None
+
 import cProfile
 import multiprocessing as mp
 import pstats
@@ -81,7 +89,7 @@ class Tokenizer:
         return byte_seq.decode('utf-8', errors='replace')
 
 
-def train_bpe(
+def _train_bpe_py(
     input_path: str,
     vocab_size: int,
     special_tokens: list[str],
@@ -208,3 +216,26 @@ def train_bpe(
         print(s.getvalue())
 
     return vocab, merges
+
+
+def train_bpe(
+    input_path: str,
+    vocab_size: int,
+    special_tokens: list[str],
+    *,
+    profile: bool = False,
+    progress: bool = False,
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    if _rsbpe is not None:
+        return _rsbpe.train_bpe(
+            input_path=input_path,
+            vocab_size=vocab_size,
+            special_tokens=special_tokens,
+        )
+    return _train_bpe_py(
+        input_path=input_path,
+        vocab_size=vocab_size,
+        special_tokens=special_tokens,
+        profile=profile,
+        progress=progress,
+    )
