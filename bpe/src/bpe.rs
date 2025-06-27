@@ -39,6 +39,15 @@ pub fn train(
     let mut next_id = 256u32;
     let mut ordered_merges = Vec::new();
     
+    // Initialize pair frequencies once (optimization: avoid recalculating each iteration)
+    let mut pair_freq: HashMap<(u32, u32), u32> = HashMap::new();
+    for (word, freq) in &word_tokens {
+        for j in 0..word.len().saturating_sub(1) {
+            let pair = (word[j], word[j + 1]);
+            *pair_freq.entry(pair).or_insert(0) += freq;
+        }
+    }
+    
     // Create progress bar for BPE merges
     let pb = if progress {
         let pb = ProgressBar::new(num_merges as u64);
@@ -55,15 +64,6 @@ pub fn train(
     };
     
     for _i in 0..num_merges {
-        // Calculate pair frequencies
-        let mut pair_freq: HashMap<(u32, u32), u32> = HashMap::new();
-        for (word, freq) in &word_tokens {
-            for j in 0..word.len().saturating_sub(1) {
-                let pair = (word[j], word[j + 1]);
-                *pair_freq.entry(pair).or_insert(0) += freq;
-            }
-        }
-        
         if pair_freq.is_empty() {
             break;
         }
@@ -94,24 +94,57 @@ pub fn train(
         merges.insert(best_pair, next_id);
         ordered_merges.push(best_pair);
         
+        // Remove the merged pair from frequency table
+        pair_freq.remove(&best_pair);
         
-        // Update word_tokens by applying the merge
-        let mut new_word_tokens: HashMap<Vec<u32>, u32> = HashMap::new();
-        for (word, freq) in word_tokens {
+        // Update word_tokens and pair frequencies incrementally
+        let mut words_to_update = Vec::new();
+        for (word, freq) in &word_tokens {
+            // Check if word contains the pair to merge
+            let contains_pair = (0..word.len().saturating_sub(1))
+                .any(|i| word[i] == best_pair.0 && word[i + 1] == best_pair.1);
+                
+            if contains_pair {
+                words_to_update.push((word.clone(), *freq));
+            }
+        }
+        
+        // Apply incremental updates for affected words
+        for (old_word, freq) in words_to_update {
+            // Remove old pair frequencies for this word
+            for i in 0..old_word.len().saturating_sub(1) {
+                let pair = (old_word[i], old_word[i + 1]);
+                if let Some(count) = pair_freq.get_mut(&pair) {
+                    *count -= freq;
+                    if *count == 0 {
+                        pair_freq.remove(&pair);
+                    }
+                }
+            }
+            
+            // Apply merge to create new word
             let mut new_word = Vec::new();
             let mut i = 0;
-            while i < word.len() {
-                if i < word.len() - 1 && word[i] == best_pair.0 && word[i + 1] == best_pair.1 {
+            while i < old_word.len() {
+                if i < old_word.len() - 1 && old_word[i] == best_pair.0 && old_word[i + 1] == best_pair.1 {
                     new_word.push(next_id);
                     i += 2;
                 } else {
-                    new_word.push(word[i]);
+                    new_word.push(old_word[i]);
                     i += 1;
                 }
             }
-            new_word_tokens.insert(new_word, freq);
+            
+            // Add new pair frequencies for the merged word
+            for i in 0..new_word.len().saturating_sub(1) {
+                let pair = (new_word[i], new_word[i + 1]);
+                *pair_freq.entry(pair).or_insert(0) += freq;
+            }
+            
+            // Update word_tokens
+            word_tokens.remove(&old_word);
+            word_tokens.insert(new_word, freq);
         }
-        word_tokens = new_word_tokens;
         next_id += 1;
         
         // Update progress bar
@@ -331,6 +364,15 @@ pub fn train_from_file(
     let mut next_id = 256u32;
     let mut ordered_merges = Vec::new();
     
+    // Initialize pair frequencies once (optimization: avoid recalculating each iteration)
+    let mut pair_freq: HashMap<(u32, u32), u32> = HashMap::new();
+    for (word, freq) in &word_tokens {
+        for j in 0..word.len().saturating_sub(1) {
+            let pair = (word[j], word[j + 1]);
+            *pair_freq.entry(pair).or_insert(0) += freq;
+        }
+    }
+    
     // Create progress bar for BPE merges
     let pb = if progress {
         let pb = ProgressBar::new(num_merges as u64);
@@ -347,15 +389,6 @@ pub fn train_from_file(
     };
     
     for _i in 0..num_merges {
-        // Calculate pair frequencies
-        let mut pair_freq: HashMap<(u32, u32), u32> = HashMap::new();
-        for (word, freq) in &word_tokens {
-            for j in 0..word.len().saturating_sub(1) {
-                let pair = (word[j], word[j + 1]);
-                *pair_freq.entry(pair).or_insert(0) += freq;
-            }
-        }
-        
         if pair_freq.is_empty() {
             break;
         }
@@ -386,23 +419,57 @@ pub fn train_from_file(
         merges.insert(best_pair, next_id);
         ordered_merges.push(best_pair);
         
-        // Update word_tokens by applying the merge
-        let mut new_word_tokens: HashMap<Vec<u32>, u32> = HashMap::new();
-        for (word, freq) in word_tokens {
+        // Remove the merged pair from frequency table
+        pair_freq.remove(&best_pair);
+        
+        // Update word_tokens and pair frequencies incrementally
+        let mut words_to_update = Vec::new();
+        for (word, freq) in &word_tokens {
+            // Check if word contains the pair to merge
+            let contains_pair = (0..word.len().saturating_sub(1))
+                .any(|i| word[i] == best_pair.0 && word[i + 1] == best_pair.1);
+                
+            if contains_pair {
+                words_to_update.push((word.clone(), *freq));
+            }
+        }
+        
+        // Apply incremental updates for affected words
+        for (old_word, freq) in words_to_update {
+            // Remove old pair frequencies for this word
+            for i in 0..old_word.len().saturating_sub(1) {
+                let pair = (old_word[i], old_word[i + 1]);
+                if let Some(count) = pair_freq.get_mut(&pair) {
+                    *count -= freq;
+                    if *count == 0 {
+                        pair_freq.remove(&pair);
+                    }
+                }
+            }
+            
+            // Apply merge to create new word
             let mut new_word = Vec::new();
             let mut i = 0;
-            while i < word.len() {
-                if i < word.len() - 1 && word[i] == best_pair.0 && word[i + 1] == best_pair.1 {
+            while i < old_word.len() {
+                if i < old_word.len() - 1 && old_word[i] == best_pair.0 && old_word[i + 1] == best_pair.1 {
                     new_word.push(next_id);
                     i += 2;
                 } else {
-                    new_word.push(word[i]);
+                    new_word.push(old_word[i]);
                     i += 1;
                 }
             }
-            new_word_tokens.insert(new_word, freq);
+            
+            // Add new pair frequencies for the merged word
+            for i in 0..new_word.len().saturating_sub(1) {
+                let pair = (new_word[i], new_word[i + 1]);
+                *pair_freq.entry(pair).or_insert(0) += freq;
+            }
+            
+            // Update word_tokens
+            word_tokens.remove(&old_word);
+            word_tokens.insert(new_word, freq);
         }
-        word_tokens = new_word_tokens;
         next_id += 1;
         
         // Update progress bar
