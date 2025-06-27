@@ -10,6 +10,11 @@ from collections.abc import Iterable
 import regex as re
 from tqdm import tqdm, trange
 
+try:
+    from tokenizer_rs import train_bpe_py as _rust_train_bpe
+except Exception:  # pragma: no cover - optional dependency may not be built
+    _rust_train_bpe = None
+
 PATTERN = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\v\p{L}\p{N}]+|\s+(?!\S)|\s+")
 
 
@@ -88,6 +93,7 @@ def train_bpe(
     *,
     profile: bool = False,
     progress: bool = False,
+    use_rust: bool | None = None,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     profiler = cProfile.Profile() if profile else None
     if profiler:
@@ -95,6 +101,19 @@ def train_bpe(
 
     with open(input_path, encoding="utf-8") as f:
         text = f.read()
+
+    if use_rust is None:
+        use_rust = _rust_train_bpe is not None
+
+    if use_rust and _rust_train_bpe:
+        vocab_map, merges_list = _rust_train_bpe(text)
+        vocab = {int(k): v.encode("utf-8") for k, v in vocab_map.items()}
+        merges = []
+        for a_id, b_id in merges_list:
+            merges.append((vocab[a_id], vocab[b_id]))
+        if profiler:
+            profiler.disable()
+        return vocab, merges
 
     # Split into documents using <|endoftext|> as a delimiter when present.
     if "<|endoftext|>" in special_tokens:
