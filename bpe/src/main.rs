@@ -1,6 +1,7 @@
 mod dataset;
 mod bpe;
 mod common;
+mod pretokenize;
 use std::collections::HashMap;
 use std::time::Instant;
 use crate::dataset::get_dataset;
@@ -17,7 +18,7 @@ fn main() {
 
     let ids = text.as_bytes();
 
-    let u32_ids = train(text_ref, &mut merges, &mut vocab, &mut counts);
+    let (u32_ids, _vocab_bytes) = train(text_ref, 512, vec!["<|endoftext|>".to_string()], &mut merges, &mut vocab, &mut counts, false);
 
     let elapsed = now.elapsed();
     println!("Training Elapsed: {:.2?}", elapsed);

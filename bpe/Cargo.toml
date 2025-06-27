@@ -16,3 +16,4 @@ pyo3 = { version = "0.21.2", features = ["extension-module"] }
 regex = "1.10.2"
 fancy-regex = "0.13"
 indicatif = "0.17"
+rayon = "1.8"

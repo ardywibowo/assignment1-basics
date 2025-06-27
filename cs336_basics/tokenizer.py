@@ -12,8 +12,10 @@ from tqdm import tqdm, trange
 
 try:
     from tokenizer_rs import train_bpe_py as _rust_train_bpe
+    from tokenizer_rs import train_bpe_from_file_py as _rust_train_bpe_from_file
 except Exception:  # pragma: no cover - optional dependency may not be built
     _rust_train_bpe = None
+    _rust_train_bpe_from_file = None
 
 PATTERN = re.compile(
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -103,21 +105,38 @@ def train_bpe(
     profile: bool = False,
     progress: bool = False,
     use_rust: bool | None = None,
+    chunk_size: int = 64 * 1024 * 1024,  # 64MB default
+    force_chunked: bool = False,
+    chunked_threshold: int = 100 * 1024 * 1024,  # 100MB threshold
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     profiler = cProfile.Profile() if profile else None
     if profiler:
         profiler.enable()
 
-    with open(input_path, encoding="utf-8") as f:
-        text = f.read()
-
     if use_rust is None:
         use_rust = _rust_train_bpe is not None
 
     if use_rust and _rust_train_bpe:
-        vocab_map, merges_list = _rust_train_bpe(
-            text, vocab_size, special_tokens, progress
-        )
+        import os
+        
+        # Check file size to decide on processing method
+        file_size = os.path.getsize(input_path)
+        use_chunked = force_chunked or (file_size > chunked_threshold and _rust_train_bpe_from_file is not None)
+        
+        if use_chunked:
+            if progress:
+                print(f"📁 Large file detected ({file_size // (1024*1024)} MB), using chunked processing...")
+            vocab_map, merges_list = _rust_train_bpe_from_file(
+                input_path, vocab_size, special_tokens, progress, chunk_size
+            )
+        else:
+            # Load entire file for smaller files
+            with open(input_path, encoding="utf-8") as f:
+                text = f.read()
+            vocab_map, merges_list = _rust_train_bpe(
+                text, vocab_size, special_tokens, progress
+            )
+        
         vocab = {int(k): bytes(v) for k, v in vocab_map.items()}
         merges = []
         for a_id, b_id in merges_list:
@@ -125,6 +144,10 @@ def train_bpe(
         if profiler:
             profiler.disable()
         return vocab, merges
+
+    # Fallback to Python implementation - always load entire file
+    with open(input_path, encoding="utf-8") as f:
+        text = f.read()
 
     # Split into documents using <|endoftext|> as a delimiter when present.
     if "<|endoftext|>" in special_tokens:
