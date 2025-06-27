@@ -16,3 +16,7 @@ gunzip -f owt_valid.txt.gz
 
 # Return to original directory
 cd ..
+
+# Build Rust tokenizer bindings
+uv pip install maturin
+maturin develop --release -m rsbpe/Cargo.toml

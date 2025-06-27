@@ -1,0 +1,12 @@
+[package]
+name = "rsbpe"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rsbpe"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21.1", features = ["extension-module"] }
+regex = "1.10.3"
