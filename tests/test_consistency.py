@@ -73,13 +73,16 @@ def test_consistency():
     # Clean up
     os.remove(test_file)
     
-    if vocab1 == vocab2 and merges1 == merges2:
-        print("\n🎉 SUCCESS: Both processing methods produce identical results!")
-        return True
-    else:
-        print("\n❌ FAILURE: Processing methods produce different results")
-        return False
+    # Assert that both processing methods produce identical results
+    assert vocab1 == vocab2, "Vocabularies differ between regular and chunked processing"
+    assert merges1 == merges2, "Merge sequences differ between regular and chunked processing"
+    
+    print("\n🎉 SUCCESS: Both processing methods produce identical results!")
 
 if __name__ == "__main__":
-    success = test_consistency()
-    sys.exit(0 if success else 1)
+    try:
+        test_consistency()
+        sys.exit(0)
+    except AssertionError as e:
+        print(f"\n❌ FAILURE: {e}")
+        sys.exit(1)
